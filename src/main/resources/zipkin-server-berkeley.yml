@@ -1,0 +1,8 @@
+# When enabled, this allows shorter env properties (ex -Dspring.profiles.active=stackdriver)
+zipkin:
+  internal:
+    module:
+      berkeley: zipkin2.module.storage.berkeley.BerkeleyStorageModule
+  storage:
+    berkeley:
+      db-path: ${BERKELEY_DB_PATH:}

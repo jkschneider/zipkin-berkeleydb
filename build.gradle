@@ -1,0 +1,23 @@
+plugins {
+  id 'java'
+}
+
+repositories {
+  mavenCentral()
+}
+
+dependencies {
+  implementation 'com.sleepycat:je:latest.release'
+  implementation 'io.zipkin.zipkin2:zipkin:latest.release'
+  implementation 'org.springframework.boot:spring-boot-autoconfigure:latest.release'
+  implementation('io.zipkin:zipkin-server:latest.release') {
+    exclude module: 'log4j-slf4j-impl'
+  }
+
+  testImplementation 'org.junit.jupiter:junit-jupiter:latest.release'
+  testImplementation 'org.assertj:assertj-core:latest.release'
+}
+
+test {
+  useJUnitPlatform()
+}
