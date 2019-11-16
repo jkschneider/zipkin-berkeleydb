@@ -4,5 +4,6 @@ zipkin:
     module:
       berkeley: zipkin2.module.storage.berkeley.BerkeleyStorageModule
   storage:
+    type: berkeley
     berkeley:
-      db-path: ${BERKELEY_DB_PATH:}
+      db-path: ${BERKELEY_DB_PATH:.berkeley}

@@ -4,9 +4,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties("zipkin.storage.berkeley")
 public class BerkeleyStorageProperties {
-  private String dbPath;
-  private int timestampBucketMinutes;
-  private int cachePercent;
+  private String dbPath = ".berkeley";
+  private int timestampBucketMinutes = 15;
+  private int cachePercent = 65;
 
   public int getTimestampBucketMinutes() {
     return timestampBucketMinutes;

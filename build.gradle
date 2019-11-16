@@ -1,6 +1,13 @@
 plugins {
   id 'java'
+  id 'com.bmuschko.docker-spring-boot-application' version '5.3.0'
+  id 'org.springframework.boot' version '2.2.1.RELEASE'
+  id 'io.spring.dependency-management' version '1.0.8.RELEASE'
+  id 'nebula.release' version '13.1.1'
 }
+
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8'
 
 repositories {
   mavenCentral()
@@ -9,7 +16,7 @@ repositories {
 dependencies {
   implementation 'com.sleepycat:je:latest.release'
   implementation 'io.zipkin.zipkin2:zipkin:latest.release'
-  implementation 'org.springframework.boot:spring-boot-autoconfigure:latest.release'
+  implementation 'org.springframework.boot:spring-boot-autoconfigure'
   implementation('io.zipkin:zipkin-server:latest.release') {
     exclude module: 'log4j-slf4j-impl'
   }
@@ -18,6 +25,31 @@ dependencies {
   testImplementation 'org.assertj:assertj-core:latest.release'
 }
 
+springBoot {
+  mainClassName = 'zipkin.server.ZipkinServer'
+}
+
+bootRun {
+  jvmArgs = ['-Dspring.profiles.active=berkeley']
+}
+
 test {
   useJUnitPlatform()
+}
+
+if (hasProperty('dockerUser') && hasProperty('dockerPassword')) {
+  docker {
+    registryCredentials {
+      username = dockerUser
+      password = dockerPassword
+      email = 'jkschneider@gmail.com'
+    }
+
+    springBootApplication {
+      tag = "$dockerUser/zipkin-berkeleydb:${project.version.toString().contains('+') ? 'SNAPSHOT' : project.version}"
+      baseImage = 'adoptopenjdk/openjdk8:alpine-slim'
+    }
+  }
+
+  tasks.release.dependsOn('dockerPushImage')
 }
