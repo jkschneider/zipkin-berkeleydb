@@ -26,7 +26,7 @@ public class BerkeleyStorage extends StorageComponent {
   private final EntityStore store;
   private final TimestampBuckets timestampBuckets;
 
-  private final PrimaryIndex<String, BerkeleySpan> spanById;
+  final PrimaryIndex<String, BerkeleySpan> spanById;
   private final SecondaryIndex<String, String, BerkeleySpan> spansByTraceId;
   private final SecondaryIndex<String, String, BerkeleySpan> spansBySpanName;
   private final SecondaryIndex<Long, String, BerkeleySpan> spansByTimestampBucket;
@@ -108,7 +108,11 @@ public class BerkeleyStorage extends StorageComponent {
     }
   }
 
-  private class BerkeleySpanStore implements SpanStore, Traces, ServiceAndSpanNames {
+  public void close() {
+    store.close();
+  }
+
+  class BerkeleySpanStore implements SpanStore, Traces, ServiceAndSpanNames {
     @Override
     public Call<List<String>> getRemoteServiceNames(String serviceName) {
       return new SupplierCall<>(() -> stream(spansByRemoteServiceName.keys().spliterator(), false)
@@ -148,29 +152,7 @@ public class BerkeleyStorage extends StorageComponent {
           .stream();
 
         if(!request.annotationQuery().isEmpty()) {
-          results = results.filter(trace -> {
-            List<String> keyOnly = request.annotationQuery().entrySet().stream()
-              .filter(a -> a.getValue() == null || a.getValue().isEmpty())
-              .map(Map.Entry::getKey)
-              .collect(toList());
-
-            if(trace.stream().noneMatch(span -> span.getAnnotationAndTagKeys().containsAll(keyOnly))) {
-              return false;
-            }
-
-            List<Map.Entry<String, String>> tags = request.annotationQuery().entrySet().stream()
-              .filter(a -> a.getValue() != null)
-              .collect(toList());
-
-            return trace.stream().anyMatch(span -> {
-              for (Map.Entry<String, String> tag : tags) {
-                if(!span.getTags().get(tag.getKey()).equals(tag.getValue())) {
-                  return false;
-                }
-              }
-              return true;
-            });
-          });
+          results = filterAnnotationQuery(results, request.annotationQuery());
         }
 
         if(request.minDuration() != null) {
@@ -185,6 +167,33 @@ public class BerkeleyStorage extends StorageComponent {
           .map(trace -> trace.stream().map(BerkeleySpan::toSpan).collect(toList()))
           .collect(toList());
       });
+    }
+
+    Stream<List<BerkeleySpan>> filterAnnotationQuery(Stream<List<BerkeleySpan>> results, Map<String, String> annotationQuery) {
+      results = results.filter(trace -> {
+        List<String> keyOnly = annotationQuery.entrySet().stream()
+          .filter(a -> a.getValue() == null || a.getValue().isEmpty())
+          .map(Map.Entry::getKey)
+          .collect(toList());
+
+        if(trace.stream().noneMatch(span -> span.getAnnotationAndTagKeys().containsAll(keyOnly))) {
+          return false;
+        }
+
+        List<Map.Entry<String, String>> tags = annotationQuery.entrySet().stream()
+          .filter(a -> a.getValue() != null)
+          .collect(toList());
+
+        return trace.stream().anyMatch(span -> {
+          for (Map.Entry<String, String> tag : tags) {
+            if(!span.getTags().get(tag.getKey()).equals(tag.getValue())) {
+              return false;
+            }
+          }
+          return true;
+        });
+      });
+      return results;
     }
 
     @Override
@@ -228,7 +237,7 @@ public class BerkeleyStorage extends StorageComponent {
     }
   }
 
-  private class BerkeleySpanConsumer implements SpanConsumer {
+  class BerkeleySpanConsumer implements SpanConsumer {
     @Override
     public Call<Void> accept(List<Span> spans) {
       if (spans.isEmpty()) {
