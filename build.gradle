@@ -38,7 +38,7 @@ springBoot {
 }
 
 bootRun {
-  jvmArgs = ['-Dspring.profiles.active=lucene']
+  jvmArgs = ['-Dspring.profiles.active=lucene-mapdb']
 }
 
 test {
@@ -54,7 +54,7 @@ if (hasProperty('dockerUser') && hasProperty('dockerPassword')) {
     }
 
     springBootApplication {
-      tag = "$dockerUser/zipkin-berkeleydb:${project.version.toString().contains('+') ? 'SNAPSHOT' : project.version}"
+      tag = "$dockerUser/zipkin-lucene-mapdb:${project.version.toString().contains('+') ? 'SNAPSHOT' : project.version}"
       baseImage = 'adoptopenjdk/openjdk8:alpine-slim'
     }
   }
