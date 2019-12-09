@@ -1,4 +1,4 @@
-package zipkin2.module.storage.berkeley;
+package zipkin2.module.storage.lucene;
 
 import zipkin2.Call;
 import zipkin2.Callback;
@@ -6,10 +6,6 @@ import zipkin2.Callback;
 import java.io.IOException;
 
 public class SupplierCall<V> extends Call.Base<V> {
-  public interface SupplierWithIOException<V> {
-    V get() throws IOException;
-  }
-
   private final SupplierWithIOException<V> supplier;
 
   SupplierCall(SupplierWithIOException<V> supplier) {
@@ -34,5 +30,9 @@ public class SupplierCall<V> extends Call.Base<V> {
     } catch (IOException e) {
       callback.onError(e);
     }
+  }
+
+  public interface SupplierWithIOException<V> {
+    V get() throws IOException;
   }
 }

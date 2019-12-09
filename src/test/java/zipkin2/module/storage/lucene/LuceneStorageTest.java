@@ -1,4 +1,4 @@
-package zipkin2.module.storage.berkeley;
+package zipkin2.module.storage.lucene;
 
 import com.google.common.collect.ImmutableMap;
 import com.sleepycat.persist.EntityCursor;
@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import zipkin2.Endpoint;
 import zipkin2.Span;
-import zipkin2.module.storage.berkeley.model.BerkeleySpan;
+import zipkin2.module.storage.lucene.model.BerkeleySpan;
 
 import java.io.File;
 import java.util.Arrays;
@@ -22,18 +22,18 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.StreamSupport.stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class BerkeleyStorageTest {
-  private BerkeleyStorage storage;
-  private BerkeleyStorage.BerkeleySpanStore spanStore;
-  private BerkeleyStorage.BerkeleySpanConsumer spanConsumer;
+class LuceneStorageTest {
+  private LuceneStorage storage;
+  private LuceneStorage.BerkeleySpanStore spanStore;
+  private LuceneStorage.BerkeleySpanConsumer spanConsumer;
 
   private List<BerkeleySpan> allSpansAsTrace;
 
   @BeforeEach
   void before(@TempDir File dbPath) {
-    this.storage = BerkeleyStorage.newBuilder(dbPath).build();
-    this.spanStore = (BerkeleyStorage.BerkeleySpanStore) storage.spanStore();
-    this.spanConsumer = (BerkeleyStorage.BerkeleySpanConsumer) storage.spanConsumer();
+    this.storage = LuceneStorage.newBuilder(dbPath).build();
+    this.spanStore = (LuceneStorage.BerkeleySpanStore) storage.spanStore();
+    this.spanConsumer = (LuceneStorage.BerkeleySpanConsumer) storage.spanConsumer();
 
     Endpoint endpoint = Endpoint.newBuilder().serviceName("service").build();
 
