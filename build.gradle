@@ -14,9 +14,10 @@ repositories {
 }
 
 dependencies {
-  implementation 'org.apache.lucene:lucene-queryparser:latest.release'
+  implementation 'org.apache.lucene:lucene-core:latest.release'
+  implementation 'org.apache.lucene:lucene-grouping:latest.release'
   implementation 'org.mapdb:mapdb:latest.release'
-  implementation 'org.roaring:RoaringBitmap:latest.release'
+  implementation 'org.roaringbitmap:RoaringBitmap:latest.release'
 
   implementation 'io.zipkin.zipkin2:zipkin:latest.release'
   implementation 'org.springframework.boot:spring-boot-autoconfigure'
@@ -38,7 +39,7 @@ springBoot {
 }
 
 bootRun {
-  jvmArgs = ['-Dspring.profiles.active=lucene-mapdb']
+  jvmArgs = ['-Dspring.profiles.active=lucene']
 }
 
 test {
