@@ -16,6 +16,7 @@ repositories {
 dependencies {
   implementation 'org.apache.lucene:lucene-core:latest.release'
   implementation 'org.apache.lucene:lucene-grouping:latest.release'
+  implementation 'org.apache.lucene:lucene-analyzers-common:latest.release'
   implementation 'org.mapdb:mapdb:latest.release'
   implementation 'org.roaringbitmap:RoaringBitmap:latest.release'
 
@@ -28,10 +29,9 @@ dependencies {
   implementation 'org.roaringbitmap:RoaringBitmap:latest.release'
   implementation 'org.apache.orc:orc:1.6.1'
 
-  testImplementation 'org.junit.jupiter:junit-jupiter:latest.release'
-  testImplementation 'org.junit.jupiter:junit-jupiter-params:latest.release'
+  testImplementation 'org.junit.jupiter:junit-jupiter:5.5.2'
+  testImplementation 'org.junit.jupiter:junit-jupiter-params:5.5.2'
   testImplementation 'org.assertj:assertj-core:latest.release'
-  testImplementation 'com.google.guava:guava:latest.release'
 }
 
 springBoot {

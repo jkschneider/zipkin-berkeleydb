@@ -1,27 +1,17 @@
 package zipkin2.module.storage.lucene;
 
-import com.google.common.collect.ImmutableMap;
-import org.assertj.core.util.Maps;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.RepeatedTest;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.aggregator.AggregateWith;
+import org.junit.jupiter.params.provider.CsvSource;
 import zipkin2.Endpoint;
 import zipkin2.Span;
-import zipkin2.storage.QueryRequest;
-import zipkin2.storage.ServiceAndSpanNames;
-import zipkin2.storage.SpanStore;
-import zipkin2.storage.Traces;
+import zipkin2.storage.*;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -92,25 +82,60 @@ class LuceneStorageTest {
         .containsExactlyInAnyOrder("http.server.requests", "http.connection.start");
     }
 
-    @SuppressWarnings("unchecked")
     @Test
-    void filterAnnotationQuery() {
-      List<Map<String, String>> queries = Arrays.asList(
-        Maps.newHashMap("mock.user", ""),
-        Maps.newHashMap("mock.user", null),
-        ImmutableMap.of("mock.user", "", "method", ""),
-        ImmutableMap.of("mock.user", "", "method", "GET")
-      );
-
-      assertThat(queries)
-        .extracting(query -> spanStore.getTraces(QueryRequest.newBuilder()
-          .annotationQuery(query)
-          .endTs(2)
-          .lookback(2)
-          .limit(1)
-          .build()).execute())
-        .extracting(traces -> traces.stream().findFirst().orElse(null))
-        .containsExactly(trace, trace, trace, trace);
+    void filterSpanName() throws IOException {
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .spanName("Http.Server.Requests")
+          .endTs(2).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).containsExactly(trace);
     }
+
+    @Test
+    void filterServiceName() throws IOException {
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .serviceName("Service")
+          .endTs(2).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).containsExactly(trace);
+    }
+
+    @Test
+    void filterRemoteServiceName() throws IOException {
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .remoteServiceName("Service")
+          .endTs(2).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).containsExactly(trace);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+      "mock.user",
+      "mock.user=null",
+      "mock.user, method",
+      "mock.User, method=GET"
+    })
+    void filterAnnotationQuery(@AggregateWith(AnnotationQueryAggregator.class) Map<String, String> query) throws IOException {
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .annotationQuery(query)
+          .endTs(2).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).containsExactly(trace);
+    }
+  }
+
+  @Test
+  void normalizeQueryTerms() {
+    assertThat(LuceneStorage.normalizeValue("GET")).isEqualTo("get");
+    assertThat(LuceneStorage.normalizeValue("HELLO WORLD")).isEqualTo("hello world");
   }
 }
