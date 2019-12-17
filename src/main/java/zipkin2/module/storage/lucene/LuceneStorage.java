@@ -11,15 +11,17 @@ import org.apache.lucene.search.grouping.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
-import org.jetbrains.annotations.NotNull;
 import org.mapdb.*;
 import org.roaringbitmap.longlong.Roaring64NavigableMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import zipkin2.*;
 import zipkin2.storage.*;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
@@ -30,7 +32,20 @@ import static org.apache.lucene.document.Field.Store.NO;
 import static org.apache.lucene.search.BooleanClause.Occur.MUST;
 
 public class LuceneStorage extends StorageComponent {
+  private Logger logger = LoggerFactory.getLogger(LuceneStorage.class);
+
+  /**
+   * To not produce unnecessarily long queries, we don't look back further than first Lucene support
+   */
+  static final long EARLIEST_MS = 1576276500000L; // December 2019
+
   private static final String TAG_PREFIX = "tt";
+
+  private final IndexWriter indexWriter;
+
+  private final List<String> autocompleteKeys;
+  private final int autocompleteTtl;
+  private final int autocompleteCardinality;
 
   private final LuceneSpanConsumer spanConsumer;
   private final LuceneSpanStore spanStore;
@@ -41,9 +56,11 @@ public class LuceneStorage extends StorageComponent {
   private final HTreeMap<String, Roaring64NavigableMap> spanIdsByTraceId;
   private final HTreeMap<UniqueSpanId, Span> spanBySpanId;
 
-  private final IndexWriter indexWriter;
+  private LuceneStorage(List<String> autocompleteKeys, int autocompleteTtl, int autocompleteCardinality, File indexDirectory) {
+    this.autocompleteKeys = autocompleteKeys;
+    this.autocompleteTtl = autocompleteTtl;
+    this.autocompleteCardinality = autocompleteCardinality;
 
-  private LuceneStorage(File indexDirectory) {
     try {
       Directory fileIndex = FSDirectory.open(new File(indexDirectory, "lucene").toPath());
       StandardAnalyzer analyzer = new StandardAnalyzer();
@@ -100,6 +117,13 @@ public class LuceneStorage extends StorageComponent {
 
   public static final class Builder extends StorageComponent.Builder {
     private final File indexDirectory;
+    private List<String> autocompleteKeys = Collections.emptyList();
+    private int autocompleteTtl = (int) TimeUnit.HOURS.toMillis(1);
+
+    /**
+     * 5 site tags with cardinality 4000 each.
+     */
+    private int autocompleteCardinality = 5 * 4000;
 
     public Builder(File indexDirectory) {
       this.indexDirectory = indexDirectory;
@@ -127,26 +151,53 @@ public class LuceneStorage extends StorageComponent {
       return this;
     }
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Builder autocompleteKeys(List<String> autocompleteKeys) {
+      this.autocompleteKeys = autocompleteKeys;
+      return this;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Builder autocompleteTtl(int autocompleteTtl) {
+      this.autocompleteTtl = autocompleteTtl;
+      return this;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Builder autocompleteCardinality(int autocompleteCardinality) {
+      this.autocompleteCardinality = autocompleteCardinality;
+      return this;
+    }
+
     @Override
     public LuceneStorage build() {
-      return new LuceneStorage(indexDirectory);
+      return new LuceneStorage(autocompleteKeys, autocompleteTtl, autocompleteCardinality, indexDirectory);
     }
   }
 
   class LuceneSpanStore implements Traces, SpanStore, ServiceAndSpanNames {
     @Override
     public Call<List<String>> getRemoteServiceNames(String serviceName) {
-      return new SupplierCall<>(() -> traceIdsByRemoteServiceName.getKeys().stream().sorted().collect(toList()));
+      return Call.create(traceIdsByRemoteServiceName.getKeys().stream().sorted().collect(toList()));
     }
 
     @Override
     public Call<List<Span>> getTrace(String traceId) {
-      return new SupplierCall<>(() -> getTraceBlocking(traceId));
+      return Call.create(getTraceBlocking(traceId));
     }
 
     @Override
     public Call<List<List<Span>>> getTraces(Iterable<String> traceIds) {
-      return new SupplierCall<>(() -> stream(traceIds.spliterator(), false)
+      return Call.create(stream(traceIds.spliterator(), false)
         .map(this::getTraceBlocking)
         .collect(toList()));
     }
@@ -168,62 +219,67 @@ public class LuceneStorage extends StorageComponent {
 
     @Override
     public Call<List<String>> getServiceNames() {
-      return new SupplierCall<>(() -> traceIdsByServiceName.keySet().stream().sorted().collect(toList()));
+      return Call.create(traceIdsByServiceName.keySet().stream().sorted().collect(toList()));
     }
 
     @Override
     public Call<List<String>> getSpanNames(String serviceName) {
-      return new SupplierCall<>(() -> {
-        try (IndexReader reader = DirectoryReader.open(indexWriter)) {
-          TermGroupSelector spanNameGroupSelector = new TermGroupSelector("spanName");
-          FirstPassGroupingCollector<BytesRef> firstPassCollector = new FirstPassGroupingCollector<>(spanNameGroupSelector,
-            Sort.RELEVANCE, 10000);
+      try (IndexReader reader = DirectoryReader.open(indexWriter)) {
+        TermGroupSelector spanNameGroupSelector = new TermGroupSelector("spanName");
+        FirstPassGroupingCollector<BytesRef> firstPassCollector = new FirstPassGroupingCollector<>(spanNameGroupSelector,
+          Sort.RELEVANCE, 10000);
 
-          new IndexSearcher(reader).search(new TermQuery(new Term("serviceName", serviceName)), firstPassCollector);
+        new IndexSearcher(reader).search(new TermQuery(new Term("serviceName", serviceName)), firstPassCollector);
 
-          Collection<SearchGroup<BytesRef>> topGroups = firstPassCollector.getTopGroups(0);
-          if (topGroups == null) {
-            return emptyList();
-          }
-
-          return new DistinctValuesCollector<>(spanNameGroupSelector, topGroups, spanNameGroupSelector)
-            .getGroups()
-            .stream()
-            .map(group -> group.groupValue.utf8ToString())
-            .collect(toList());
+        Collection<SearchGroup<BytesRef>> topGroups = firstPassCollector.getTopGroups(0);
+        if (topGroups == null) {
+          return Call.emptyList();
         }
-      });
+
+        return Call.create(new DistinctValuesCollector<>(spanNameGroupSelector, topGroups, spanNameGroupSelector)
+          .getGroups()
+          .stream()
+          .map(group -> group.groupValue.utf8ToString())
+          .collect(toList()));
+      } catch (IOException e) {
+        logger.error("Failed to retrieve span names", e);
+        return Call.emptyList();
+      }
     }
 
     @Override
     public Call<List<DependencyLink>> getDependencies(long endTs, long lookback) {
-      // FIXME implement me!
-      return new SupplierCall<>(Collections::emptyList);
+      if (endTs <= 0) throw new IllegalArgumentException("endTs <= 0");
+      if (lookback <= 0) throw new IllegalArgumentException("lookback <= 0");
+
+      throw new UnsupportedOperationException("Lucene storage does not support dependency links yet");
     }
 
     @Override
     public Call<List<List<Span>>> getTraces(QueryRequest request) {
-      return new SupplierCall<>(() -> {
-        try (IndexReader reader = DirectoryReader.open(indexWriter)) {
-          IndexSearcher indexSearcher = new IndexSearcher(reader);
-          List<List<Span>> results = new ArrayList<>();
-          ScoreDoc scoreDoc = null;
-          while(results.size() <= request.limit()) {
-            ScoreDoc prevScoreDoc = scoreDoc;
-            scoreDoc = tracesPage(request, indexSearcher, results, scoreDoc);
-            if(prevScoreDoc != null && prevScoreDoc.doc == scoreDoc.doc) {
-              break; // no more results available
-            }
+      try (IndexReader reader = DirectoryReader.open(indexWriter)) {
+        IndexSearcher indexSearcher = new IndexSearcher(reader);
+        List<List<Span>> results = new ArrayList<>();
+        ScoreDoc scoreDoc = null;
+        while (results.size() <= request.limit()) {
+          ScoreDoc prevScoreDoc = scoreDoc;
+          scoreDoc = tracesPage(request, indexSearcher, results, scoreDoc);
+          if (scoreDoc == null || (prevScoreDoc != null && prevScoreDoc.doc == scoreDoc.doc)) {
+            break; // no more results available
           }
-          return results.size() > request.limit() ? results.subList(0, request.limit()) : results;
         }
-      });
+        return Call.create(results.size() > request.limit() ? results.subList(0, request.limit()) : results);
+      } catch (IOException e) {
+        logger.error("Failed to get traces", e);
+        return Call.emptyList();
+      }
     }
 
-    @NotNull
     private ScoreDoc tracesPage(QueryRequest request, IndexSearcher indexSearcher, List<List<Span>> results,
                                 ScoreDoc previous) throws IOException {
       BooleanQuery.Builder query = new BooleanQuery.Builder();
+
+      query.add(LongPoint.newRangeQuery("timestampPoint", 0, request.endTs()), MUST);
 
       if (request.remoteServiceName() != null) {
         query.add(new TermQuery(new Term("remoteServiceName", request.remoteServiceName())), MUST);
@@ -234,7 +290,7 @@ public class LuceneStorage extends StorageComponent {
       }
 
       if (request.spanName() != null) {
-        query.add(new TermQuery(new Term("spanName", normalizeValue(request.spanName()))), MUST);
+        query.add(new TermQuery(new Term("spanName", request.spanName())), MUST);
       }
 
       String[] tagOnlyQueries = request.annotationQuery().entrySet().stream()
@@ -268,9 +324,18 @@ public class LuceneStorage extends StorageComponent {
         traceIds.add(Long.toHexString(doc.getField("traceId").numericValue().longValue()));
       }
 
-      traceIds.stream().map(this::getTraceBlocking).forEach(results::add);
+      traceIds.stream().map(this::getTraceBlocking)
+        .filter(trace -> trace.stream().allMatch(span -> span.timestampAsLong() >= request.endTs() - request.lookback()))
+        .filter(trace -> {
+          Long minDuration = request.minDuration();
+          Long maxDuration = request.maxDuration();
+          return (minDuration == null && maxDuration == null) || trace.stream()
+            .anyMatch(span -> span.durationAsLong() <= (maxDuration == null ? Long.MAX_VALUE : maxDuration) &&
+              span.durationAsLong() >= (minDuration == null ? Long.MIN_VALUE : minDuration));
+        })
+        .forEach(results::add);
 
-      return search.scoreDocs[search.scoreDocs.length - 1];
+      return search.scoreDocs.length == 0 ? null : search.scoreDocs[search.scoreDocs.length - 1];
     }
   }
 
@@ -280,7 +345,8 @@ public class LuceneStorage extends StorageComponent {
       if (spans.isEmpty()) {
         return Call.create(null);
       }
-      return new SupplierCall<>(() -> {
+
+      try {
         for (Span span : spans) {
           addToBitmap(traceIdsByServiceName, span.localServiceName(), span.traceId());
           addToBitmap(traceIdsByRemoteServiceName, span.remoteServiceName(), span.traceId());
@@ -312,8 +378,11 @@ public class LuceneStorage extends StorageComponent {
           indexWriter.addDocument(document);
         }
         indexWriter.commit();
-        return null;
-      });
+      } catch (IOException e) {
+        logger.error("Failed to store trace", e);
+      }
+
+      return Call.create(null);
     }
 
     private void addToBitmap(HTreeMap<String, Roaring64NavigableMap> map, String key, String value) {
@@ -329,21 +398,21 @@ public class LuceneStorage extends StorageComponent {
   private static StandardAnalyzer standardAnalyzer = new StandardAnalyzer();
 
   static String normalizeValue(String value) {
-    try(TokenStream tokenStream = standardAnalyzer.tokenStream("", value)) {
+    try (TokenStream tokenStream = standardAnalyzer.tokenStream("", value)) {
       tokenStream.reset();
 
       CharTermAttribute charTermAttribute = tokenStream.addAttribute(CharTermAttribute.class);
 
       StringBuilder normalized = new StringBuilder();
       int token = 0;
-      while(tokenStream.incrementToken()) {
-        if(token++ > 0)
+      while (tokenStream.incrementToken()) {
+        if (token++ > 0)
           normalized.append(' ');
         normalized.append(charTermAttribute.toString());
       }
 
       return normalized.toString();
-    } catch(IOException e) {
+    } catch (IOException e) {
       throw new RuntimeException("Unable to tokenize search term " + value, e);
     }
   }

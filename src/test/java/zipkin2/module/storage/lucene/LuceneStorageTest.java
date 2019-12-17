@@ -32,7 +32,7 @@ class LuceneStorageTest {
       .addAnnotation(123, "mock.user")
       .putTag("method", "GET")
       .timestamp(1)
-      .duration(1)
+      .duration(100)
       .build(),
     Span.newBuilder()
       .id("2")
@@ -43,7 +43,8 @@ class LuceneStorageTest {
       .addAnnotation(123, "mock.user")
       .putTag("method", "GET")
       .timestamp(1)
-      .duration(1)
+      .duration(200)
+      .parentId("1")
       .build(),
     Span.newBuilder()
       .id("3")
@@ -53,7 +54,8 @@ class LuceneStorageTest {
       .remoteEndpoint(endpoint)
       .addAnnotation(123, "mock.user")
       .timestamp(2)
-      .duration(2)
+      .duration(300)
+      .parentId("2")
       .build()
   );
 
@@ -83,11 +85,51 @@ class LuceneStorageTest {
     }
 
     @Test
+    void minDuration() throws IOException {
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .minDuration(300L)
+          .endTs(1).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).containsExactly(trace);
+
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .minDuration(301L)
+          .endTs(1).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).isEmpty();
+    }
+
+    @Test
+    void maxDuration() throws IOException {
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .minDuration(100L)
+          .maxDuration(100L)
+          .endTs(1).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).containsExactly(trace);
+
+      assertThat(
+        spanStore.getTraces(QueryRequest.newBuilder()
+          .minDuration(10L)
+          .maxDuration(99L)
+          .endTs(1).lookback(2).limit(1)
+          .build()
+        ).execute()
+      ).isEmpty();
+    }
+
+    @Test
     void filterSpanName() throws IOException {
       assertThat(
         spanStore.getTraces(QueryRequest.newBuilder()
           .spanName("Http.Server.Requests")
-          .endTs(2).lookback(2).limit(1)
+          .endTs(1).lookback(2).limit(1)
           .build()
         ).execute()
       ).containsExactly(trace);
@@ -98,7 +140,7 @@ class LuceneStorageTest {
       assertThat(
         spanStore.getTraces(QueryRequest.newBuilder()
           .serviceName("Service")
-          .endTs(2).lookback(2).limit(1)
+          .endTs(1).lookback(2).limit(1)
           .build()
         ).execute()
       ).containsExactly(trace);
@@ -108,8 +150,8 @@ class LuceneStorageTest {
     void filterRemoteServiceName() throws IOException {
       assertThat(
         spanStore.getTraces(QueryRequest.newBuilder()
-          .remoteServiceName("Service")
-          .endTs(2).lookback(2).limit(1)
+          .remoteServiceName("SERVICE")
+          .endTs(1).lookback(2).limit(1)
           .build()
         ).execute()
       ).containsExactly(trace);
@@ -126,7 +168,7 @@ class LuceneStorageTest {
       assertThat(
         spanStore.getTraces(QueryRequest.newBuilder()
           .annotationQuery(query)
-          .endTs(2).lookback(2).limit(1)
+          .endTs(1).lookback(2).limit(1)
           .build()
         ).execute()
       ).containsExactly(trace);
